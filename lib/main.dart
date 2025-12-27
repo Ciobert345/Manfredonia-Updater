@@ -15,8 +15,9 @@ void main() async {
   await NotificationService().init();
 
   WindowOptions windowOptions = const WindowOptions(
-    size: Size(520, 770),
+    size: Size(520, 760),
     center: true,
+    title: 'Manfredonia Manager',
     backgroundColor: Colors.transparent,
     skipTaskbar: false,
     titleBarStyle: TitleBarStyle.hidden,
@@ -47,7 +48,7 @@ class ManfredoniaApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'Manfredonia Updater',
+      title: 'Manfredonia Manager',
       builder: (context, child) {
         return ClipRRect(
           borderRadius: BorderRadius.circular(12),

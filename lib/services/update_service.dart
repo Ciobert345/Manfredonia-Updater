@@ -87,4 +87,30 @@ class UpdateService {
 
     onProgress(1.0, 'completed');
   }
+
+  Future<void> downloadFile(
+    String url,
+    String savePath,
+    Function(double progress) onProgress,
+  ) async {
+    final client = http.Client();
+    final request = http.Request('GET', Uri.parse(url));
+    final response = await client.send(request);
+
+    final totalSize = response.contentLength ?? 0;
+    int downloadedSize = 0;
+    final file = File(savePath);
+    final IOSink sink = file.openWrite();
+
+    await for (var chunk in response.stream) {
+      sink.add(chunk);
+      downloadedSize += chunk.length;
+      if (totalSize > 0) {
+        onProgress(downloadedSize / totalSize);
+      }
+    }
+
+    await sink.close();
+    client.close();
+  }
 }

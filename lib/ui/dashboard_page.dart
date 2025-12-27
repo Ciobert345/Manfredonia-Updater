@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -20,7 +21,7 @@ class DashboardPage extends StatefulWidget {
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage> with WidgetsBindingObserver {
   final LauncherService _launcherService = LauncherService();
   final GithubService _githubService = GithubService();
   final UpdateService _updateService = UpdateService();
@@ -32,7 +33,8 @@ class _DashboardPageState extends State<DashboardPage> {
   String _localVersion = 'v?.?.?';
   String _remoteVersion = 'v?.?.?';
   GithubRelease? _latestRelease;
-  String? _lastNotifiedVersion;
+  String? _lastNotifiedTag;
+  String? _placeholderInstance;
 
   double _progress = 0.0;
   bool _isUpdating = false;
@@ -55,11 +57,26 @@ class _DashboardPageState extends State<DashboardPage> {
   void initState() {
     super.initState();
     _launchers = _launcherService.getLauncherPaths();
+    WidgetsBinding.instance.addObserver(this);
     
     // Simply load the last session on startup
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadLastSession();
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print("[Dashboard] Window focused, refreshing instances...");
+      _refreshInstances();
+    }
   }
 
 
@@ -88,94 +105,50 @@ class _DashboardPageState extends State<DashboardPage> {
     });
 
     if (value != null) {
-      List<String> combinedInstances = [];
-      if (value == 'sklauncher') {
-        combinedInstances.addAll(_launcherService.scanInstances(_launchers['sklauncher']!));
-        combinedInstances.addAll(_launcherService.scanInstances(_launchers['sklauncher_alt']!));
-      } else if (value == 'modrinth') {
-        combinedInstances.addAll(_launcherService.scanInstances(_launchers['modrinth']!));
-        combinedInstances.addAll(_launcherService.scanInstances(_launchers['modrinth_alt']!));
-      } else if (_launchers.containsKey(value)) {
-        combinedInstances.addAll(_launcherService.scanInstances(_launchers[value]!));
+      await _refreshInstances();
+    }
+  }
+
+  Future<void> _refreshInstances() async {
+    if (_selectedLauncher == null) return;
+    
+    List<String> combinedInstances = [];
+    final value = _selectedLauncher;
+
+    if (value == 'sklauncher') {
+      combinedInstances.addAll(_launcherService.scanInstances(_launchers['sklauncher']!));
+      combinedInstances.addAll(_launcherService.scanInstances(_launchers['sklauncher_alt']!));
+    } else if (value == 'modrinth') {
+      combinedInstances.addAll(_launcherService.scanInstances(_launchers['modrinth']!));
+      combinedInstances.addAll(_launcherService.scanInstances(_launchers['modrinth_alt']!));
+    } else if (_launchers.containsKey(value)) {
+      combinedInstances.addAll(_launcherService.scanInstances(_launchers[value]!));
+    }
+    
+    final newList = combinedInstances.toSet().toList();
+    
+    // Manage placeholder disappearance
+    if (_placeholderInstance != null) {
+      if (newList.contains(_placeholderInstance)) {
+        print("[Dashboard] Placeholder found on disk, clearing flag...");
+        _placeholderInstance = null;
+      } else if (_selectedLauncher == 'modrinth' || _selectedLauncher == 'modrinth_alt') {
+        // Only show placeholder for Modrinth launcher
+        newList.insert(0, _placeholderInstance!);
       }
-      
+    }
+
+    newList.add("__NEW_INSTALL__");
+
+    if (!listEquals(_instances, newList)) {
+      print("[Dashboard] Instances list changed, updating UI...");
       setState(() {
-        _instances = combinedInstances.toSet().toList(); // Unique instances
-        // Add option to create a new one
-        _instances.add("__NEW_INSTALL__");
+        _instances = newList;
       });
-
-      // Show info dialog if Modrinth is selected
-      if (value == 'modrinth' || value == 'modrinth_alt') {
-        Future.delayed(const Duration(milliseconds: 300), () async {
-          // Fetch required versions from manifest
-          String fabricVersion = "0.16.10"; // Default
-          String minecraftVersion = "1.21.1"; // Default
-          
-          // Ensure we have the latest release
-          if (_latestRelease == null) {
-            print("[Dashboard] Fetching latest release for Modrinth dialog...");
-            _latestRelease = await _githubService.getLatestRelease();
-          }
-          
-          if (_latestRelease != null) {
-            print("[Dashboard] Fetching manifest from: ${_latestRelease!.manifestUrl}");
-            final manifest = await _githubService.getManifest(_latestRelease!.manifestUrl, fallbackBody: _latestRelease!.body);
-            if (manifest != null) {
-              print("[Dashboard] Manifest data: $manifest");
-              // The manifest has flat structure: {"fabric": "0.18.3", "minecraft": "1.21.1"}
-              fabricVersion = manifest['fabric']?.toString() ?? fabricVersion;
-              minecraftVersion = manifest['minecraft']?.toString() ?? minecraftVersion;
-              print("[Dashboard] Parsed versions - Fabric: $fabricVersion, Minecraft: $minecraftVersion");
-            } else {
-              print("[Dashboard] Failed to fetch manifest");
-            }
-          } else {
-            print("[Dashboard] Failed to fetch latest release");
-          }
-
-          if (!mounted) return;
-          
-
-          showDialog(
-            context: context,
-            barrierDismissible: false,
-            builder: (context) => AlertDialog(
-              backgroundColor: const Color(0xFF1e293b),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.orange.withOpacity(0.3))),
-              title: const Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.orange),
-                  SizedBox(width: 12),
-                  Text("Modrinth Setup", style: TextStyle(color: Colors.white, fontSize: 18)),
-                ],
-              ),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text("IMPORTANT!", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13)),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "Modrinth uses an SQLite database for profiles.\nI cannot create instances automatically.",
-                    style: TextStyle(color: Colors.white, fontSize: 14),
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    "Please create a Fabric $fabricVersion profile (Minecraft $minecraftVersion) manually in the Modrinth launcher, then return here and select it.",
-                    style: const TextStyle(color: Colors.white70, fontSize: 13),
-                  ),
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("UNDERSTOOD", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-          );
-        });
+      
+      // Auto-validate selected instance if list changed
+      if (_selectedInstance != null && newList.contains(_selectedInstance)) {
+        _onInstanceChanged(_selectedInstance);
       }
     }
   }
@@ -187,7 +160,11 @@ class _DashboardPageState extends State<DashboardPage> {
     bool valid = false;
     String? name;
 
-    print("[Dashboard] Starting installation loop...");
+    if (_selectedLauncher == 'modrinth' || _selectedLauncher == 'modrinth_alt') {
+      await _handleModrinthMrpackInstall();
+      return;
+    }
+
     while (!valid) {
       final result = await showDialog<bool>(
         context: context,
@@ -297,34 +274,62 @@ class _DashboardPageState extends State<DashboardPage> {
         final path = await _getInstancePath();
         if (path != null) {
           final local = await _launcherService.getLocalVersion(path);
+          _latestRelease = await _githubService.getLatestRelease();
+          final latest = _latestRelease;
+          
           setState(() {
             _localVersion = 'v$local';
-          });
+            final normLocal = _normalizeVersion(local);
 
-          _latestRelease = await _githubService.getLatestRelease();
-          if (_latestRelease != null) {
-            setState(() {
-              _remoteVersion = 'v${_latestRelease!.tag}';
+            if (latest != null) {
+              _remoteVersion = 'v${latest.tag}';
+              final normRemote = _normalizeVersion(latest.tag);
+              print("[Dashboard] Version comparison: Local='$local' (norm='$normLocal') vs Remote='${latest.tag}' (norm='$normRemote')");
               
-              bool isMatch = _latestRelease!.tag == local;
+              bool isMatch = normLocal == normRemote;
 
-              if (!isMatch) {
-                _updateBtnText = "Update to v${_latestRelease!.tag}";
-                if (_lastNotifiedVersion != _latestRelease!.tag) {
-                  NotificationService().showUpdateNotification(_latestRelease!.tag);
-                  _lastNotifiedVersion = _latestRelease!.tag;
+              if (!isMatch && normLocal != "0.0.0") {
+                _updateBtnText = "Update to v${latest.tag}";
+                // Silent spam prevention: only notify once per version in a session
+                if (_lastNotifiedTag != latest.tag) {
+                  NotificationService().showUpdateNotification(latest.tag);
+                  _lastNotifiedTag = latest.tag;
+                }
+              } else if (normLocal == "0.0.0") {
+                final hasContent = Directory(p.join(path, 'mods')).existsSync() || 
+                                   Directory(p.join(path, 'config')).existsSync();
+                _updateBtnText = hasContent ? "Sync & Link Pack" : "Install Pack";
+                
+                // Only notify if sync is needed AND we haven't notified this tag yet
+                if (hasContent && _lastNotifiedTag != latest.tag) {
+                  NotificationService().showUpdateNotification(latest.tag);
+                  _lastNotifiedTag = latest.tag;
                 }
               } else {
                 _updateBtnText = "Up to date";
               }
-            });
-            _checkFabricVersion(path);
-            await _loadPreservedMods(path);
-            await _scanLocalMods(path);
-          }
+            } else {
+              _remoteVersion = 'v?.?.?';
+              _updateBtnText = "Offline / Rate Limited";
+            }
+
+            // Final override for new Modrinth installs
+            if (value == _placeholderInstance && normLocal == "0.0.0") {
+              _updateBtnText = "Waiting Modrinth";
+            }
+          });
+
+          // These don't depend on GitHub release info
+          _validateInstanceMetadata(path);
+          await _loadPreservedMods(path);
+          await _scanLocalMods(path);
         }
       } catch (e) {
         print("[Dashboard] Error in update check: $e");
+        setState(() {
+          _localVersion = 'Error';
+          _updateBtnText = "Retry Check";
+        });
       }
     }
   }
@@ -427,10 +432,12 @@ class _DashboardPageState extends State<DashboardPage> {
         // Initialize metadata for the new instance
         final manifest = await _githubService.getManifest(_latestRelease!.manifestUrl, fallbackBody: _latestRelease!.body);
         final fabricV = manifest?['fabric'] ?? '0.16.10';
+        final minecraftV = manifest?['minecraft'] ?? '1.21.1';
         await _launcherService.initializeInstance(
           path, 
           '0.0.0', 
           fabricV, 
+          minecraftV,
           displayName: _selectedInstance,
           launcherKey: _selectedLauncher,
         );
@@ -472,19 +479,8 @@ class _DashboardPageState extends State<DashboardPage> {
         preservedFiles: _preserveModsEnabled ? _preservedMods : [],
       );
 
-      // Check for Fabric version mismatch
-      if (_latestRelease!.manifestUrl.isNotEmpty) {
-        final manifest = await _githubService.getManifest(_latestRelease!.manifestUrl);
-        if (manifest != null) {
-          final requiredFabric = manifest['fabric'] as String?;
-          if (requiredFabric != null) {
-            final currentFabric = await _launcherService.getFabricVersion(path);
-            if (currentFabric != null && currentFabric != requiredFabric) {
-              _showFabricWarning(requiredFabric, currentFabric);
-            }
-          }
-        }
-      }
+      // Validate instance metadata (Fabric & MC Version) after update
+      await _validateInstanceMetadata(path);
 
       await _launcherService.setLocalVersion(path, _latestRelease!.tag);
 
@@ -603,81 +599,157 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
-  Future<void> _checkFabricVersion(String path) async {
-    print("[Dashboard] Checking Fabric version for path: $path");
-    if (_latestRelease == null) {
-      print("[Dashboard] latestRelease is null, aborting check");
-      return;
-    }
-    if (_latestRelease!.manifestUrl.isEmpty) {
-      print("[Dashboard] manifestUrl is empty, aborting check");
-      return;
-    }
+  Future<void> _validateInstanceMetadata(String path) async {
+    print("[Dashboard] Validating instance metadata for path: $path");
+    if (_latestRelease == null) return;
+    if (_latestRelease!.manifestUrl.isEmpty) return;
 
-    print("[Dashboard] Fetching manifest from: ${_latestRelease!.manifestUrl}");
     final manifest = await _githubService.getManifest(
       _latestRelease!.manifestUrl,
       fallbackBody: _latestRelease!.body
     );
-    if (manifest == null) {
-      print("[Dashboard] Failed to fetch or parse manifest");
-      return;
+    if (manifest == null) return;
+
+    // 1. Check Fabric Version
+    final requiredFabric = manifest['fabric'] as String?;
+    if (requiredFabric != null) {
+      final currentFabric = await _launcherService.getFabricVersion(path);
+      if (currentFabric == null) {
+        _showNotification(
+          "Fabric Loader not detected! Version $requiredFabric is required. Please install it in your launcher.",
+          NotificationType.warning
+        );
+      } else if (currentFabric != requiredFabric) {
+        _showNotification(
+          "Fabric Loader mismatch: required $requiredFabric, found $currentFabric. Update it in your launcher settings!",
+          NotificationType.warning
+        );
+      }
     }
 
-    final requiredFabric = manifest['fabric'] as String?;
-    print("[Dashboard] Required Fabric: $requiredFabric");
-    if (requiredFabric == null) return;
-
-    final currentFabric = await _launcherService.getFabricVersion(path);
-    print("[Dashboard] Current Fabric: $currentFabric");
-    
-    if (currentFabric != null && currentFabric != requiredFabric) {
-      print("[Dashboard] Version mismatch! Showing warning dialog.");
-      _showFabricWarning(requiredFabric, currentFabric);
-    } else {
-      print("[Dashboard] Versions match or current version could not be detected.");
+    // 2. Check Minecraft Game Version
+    final requiredMC = manifest['minecraft'] as String?;
+    if (requiredMC != null) {
+      final currentMC = await _launcherService.getMinecraftVersion(path);
+      if (currentMC == null) {
+        _showNotification(
+          "Minecraft Version not detected! Version $requiredMC is required. Please install it in your launcher.",
+          NotificationType.warning
+        );
+      } else if (currentMC != requiredMC) {
+        _showNotification(
+          "Minecraft Version mismatch: required $requiredMC, found $currentMC. Change it in your launcher settings!",
+          NotificationType.warning
+        );
+      }
     }
   }
 
-  void _showFabricWarning(String required, String current) {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1e293b),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.orange.withOpacity(0.3))),
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange),
-            SizedBox(width: 12),
-            Text("Loader Mismatch", style: TextStyle(color: Colors.white, fontSize: 18)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text("WARNING!", style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13)),
-            const SizedBox(height: 8),
-            Text(
-              "The modpack requires Fabric Loader $required.\nYour instance is currently using version $current.",
-              style: const TextStyle(color: Colors.white, fontSize: 14),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              "Please manually change the version in your Minecraft launcher settings to avoid crashes.",
-              style: TextStyle(color: Colors.white70, fontSize: 13),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("UNDERSTOOD", style: TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
+
+  Future<void> _handleModrinthMrpackInstall() async {
+    if (_latestRelease == null) {
+      print("[Dashboard] Release info missing, fetching now...");
+      setState(() => _updateBtnText = "Fetching info...");
+      _latestRelease = await _githubService.getLatestRelease();
+    }
+
+    if (_latestRelease == null || _latestRelease!.mrpackUrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No .mrpack file found in the latest release. Please contact the administrator.')),
+      );
+      return;
+    }
+
+    setState(() {
+      _placeholderInstance = "Manfredonia Pack";
+      if (!_instances.contains(_placeholderInstance)) {
+        _instances.insert(0, _placeholderInstance!);
+      }
+      _selectedInstance = _placeholderInstance;
+
+      _isUpdating = true;
+      _progress = 0.0;
+      _statusTitle = "Downloading Modpack";
+      _statusIcon = Icons.cloud_download;
+      _updateBtnText = "Downloading...";
+      _modsDone = false;
+      _configDone = false;
+      _scriptsDone = false;
+    });
+
+    try {
+      final tempDir = await getTemporaryDirectory();
+      final savePath = p.join(tempDir.path, "Manfredonia_Pack_${_latestRelease!.tag}.mrpack");
+      
+      await _updateService.downloadFile(
+        _latestRelease!.mrpackUrl,
+        savePath,
+        (progress) {
+          if (!mounted) return;
+          setState(() {
+            _progress = progress;
+            
+            // Simulating sync steps for UI feedback
+            if (progress > 0.3) _modsDone = true;
+            if (progress > 0.6) _configDone = true;
+            if (progress > 0.9) _scriptsDone = true;
+          });
+        },
+      );
+
+      print("[Dashboard] Download complete: $savePath");
+      
+      setState(() {
+        _statusTitle = "Download Complete";
+        _statusIcon = Icons.check_circle;
+        _updateBtnText = "Completed";
+        _progress = 1.0;
+        _modsDone = true;
+        _configDone = true;
+        _scriptsDone = true;
+      });
+
+      _showNotification("Download completed! Modrinth will now open the file.", NotificationType.success);
+
+      // Open the file with the system default handler (Modrinth)
+      final url = Uri.file(savePath);
+      if (await canLaunchUrl(url)) {
+        await launchUrl(url);
+      } else {
+        // Fallback for Windows if canLaunchUrl fails for local files
+        if (Platform.isWindows) {
+          await Process.run('explorer', [savePath]);
+        } else {
+          throw Exception("Could not open the downloaded file.");
+        }
+      }
+
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) {
+          setState(() {
+            _isUpdating = false;
+            _progress = 0.0;
+            _statusTitle = "Sync Manifest";
+            _statusIcon = Icons.sync;
+            
+            if (_placeholderInstance != null && _selectedInstance == _placeholderInstance) {
+              _updateBtnText = "Waiting Modrinth";
+            } else {
+              _onInstanceChanged(_selectedInstance);
+            }
+          });
+        }
+      });
+
+    } catch (e) {
+      print("[Dashboard] Error during .mrpack download: $e");
+      setState(() {
+        _isUpdating = false;
+        _statusTitle = "Download Failed";
+        _updateBtnText = "Retry";
+      });
+      _showNotification("Error downloading modpack: $e", NotificationType.error);
+    }
   }
 
   @override
@@ -746,7 +818,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Manfredonia Updater',
+                                  'Manfredonia Manager',
                                   style: TextStyle(
                                     fontSize: 20,
                                     fontWeight: FontWeight.bold,
@@ -793,7 +865,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   Expanded(
                     child: SingleChildScrollView(
                       child: Padding(
-                        padding: const EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(20),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -810,7 +882,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               ],
                               onChanged: _onLauncherChanged,
                             ),
-                            const SizedBox(height: 24),
+                            const SizedBox(height: 20),
                             
                             _buildLabel('Target Instance', opacity: _selectedLauncher == null ? 0.4 : 0.7),
                             const SizedBox(height: 8),
@@ -821,10 +893,6 @@ class _DashboardPageState extends State<DashboardPage> {
                               enabled: _selectedLauncher != null,
                               items: _instances.map((i) {
                                 if (i == "__NEW_INSTALL__") {
-                                  // Hide new install for Modrinth (uses SQLite database)
-                                  if (_selectedLauncher == 'modrinth' || _selectedLauncher == 'modrinth_alt') {
-                                    return null;
-                                  }
                                   return const DropdownMenuItem(
                                     value: "__NEW_INSTALL__",
                                     child: Text("+ Install as NEW", style: TextStyle(color: Color(0xFF3b82f6), fontWeight: FontWeight.bold)),
@@ -834,18 +902,18 @@ class _DashboardPageState extends State<DashboardPage> {
                               }).whereType<DropdownMenuItem<String>>().toList(),
                               onChanged: _onInstanceChanged,
                             ),
-                            const SizedBox(height: 24),
+                            const SizedBox(height: 20),
     
                             // Sync Status Card
                             _buildStatusCard(),
-                            const SizedBox(height: 16),
+                            const SizedBox(height: 20),
 
 
                             // Advanced Options
                             if (_selectedInstance != null && _selectedInstance != "__NEW_INSTALL__") 
                               _buildAdvancedOptions(),
                             
-                            const SizedBox(height: 24),
+                            const SizedBox(height: 20),
     
                             // Buttons
                             Row(
@@ -1038,8 +1106,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 Text('${(_progress * 100).toInt()}%', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF3b82f6))),
             ],
           ),
-          const SizedBox(height: 16),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(child: _SyncItem(label: 'Mods', isDone: _modsDone, icon: Icons.extension)),
@@ -1423,7 +1490,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                               ],
                                             ),
                                           ),
-                                        ).animate(delay: (index * 40).ms).fadeIn(duration: 400.ms).slideX(begin: 0.1, end: 0),
+                                        ).animate(delay: (index < 15 ? index * 20 : 0).ms).fadeIn(duration: 300.ms),
                                       );
                                     },
                                   ),
@@ -1474,7 +1541,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Widget _buildPrimaryButton() {
-    bool canUpdate = !_isUpdating && _selectedInstance != null && _remoteVersion != 'v?.?.?';
+    bool canUpdate = !_isUpdating && _selectedInstance != null && _remoteVersion != 'v?.?.?' && _updateBtnText != "Waiting Modrinth";
     final primaryColor = const Color(0xFF3b82f6);
     final accentColor = const Color(0xFF2563eb);
     
@@ -1622,6 +1689,12 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
     );
   }
+  String _normalizeVersion(String v) {
+    if (v == '0.0.0' || v.isEmpty) return '0.0.0';
+    final match = RegExp(r'(\d+\.\d+(\.\d+)?)').firstMatch(v);
+    if (match != null) return match.group(0)!;
+    return v.trim().toLowerCase().replaceFirst('v', '');
+  }
 }
 
 class _SyncItem extends StatelessWidget {
@@ -1760,7 +1833,7 @@ class _CustomNotification extends StatelessWidget {
             child: BackdropFilter(
               filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                 decoration: BoxDecoration(
                   color: const Color(0xFF0f172a).withOpacity(0.85),
                   borderRadius: BorderRadius.circular(20),
@@ -1776,14 +1849,14 @@ class _CustomNotification extends StatelessWidget {
                 child: Row(
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(8),
+                      padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
                         color: color.withOpacity(0.1),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(icon, color: color, size: 24),
                     ),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -1793,9 +1866,9 @@ class _CustomNotification extends StatelessWidget {
                             type.name.toUpperCase(),
                             style: TextStyle(
                               color: color,
-                              fontSize: 10,
+                              fontSize: 9,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: 1.5,
+                              letterSpacing: 1.2,
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -1803,9 +1876,9 @@ class _CustomNotification extends StatelessWidget {
                             message,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 15,
+                              fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              letterSpacing: -0.2,
+                              letterSpacing: -0.1,
                             ),
                           ),
                         ],

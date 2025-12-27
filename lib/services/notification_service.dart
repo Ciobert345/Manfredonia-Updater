@@ -8,7 +8,7 @@ class NotificationService {
 
   Future<void> init() async {
     await localNotifier.setup(
-      appName: 'Manfredonia Updater',
+      appName: 'Manfredonia Manager',
     );
   }
 
@@ -17,7 +17,7 @@ class NotificationService {
       title: "Aggiornamento disponibile",
       body: "Nuova versione v$version per il Manfredonia Pack.",
       actions: [
-        LocalNotificationAction(text: "Apri Updater"),
+        LocalNotificationAction(text: "Apri Manager"),
       ],
     );
 
@@ -30,8 +30,8 @@ class NotificationService {
 
   Future<void> showUpToDateNotification() async {
     final notification = LocalNotification(
-      title: "Manfredonia Updater",
-      body: "Il Manfredonia Pack è già aggiornato all'ultima versione.",
+      title: "Manfredonia Manager",
+      body: "Il Mod Pack è già aggiornato all'ultima versione.",
     );
 
     notification.onClick = () {

@@ -65,9 +65,9 @@ flutter_launcher_icons:
     icon_size: 256
 
 msix_config:
-  display_name: Manfredonia Updater
+  display_name: Manfredonia Manager
   publisher_display_name: Manfredonia Team
-  identity_name: com.manfredonia.updater
+  identity_name: com.manfredonia.manager
   msix_version: 1.0.0.0
   logo_path: assets/app_logo_final.png
   capabilities: internetClient, location, registryRead, registryWrite

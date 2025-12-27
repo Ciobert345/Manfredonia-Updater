@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "manfredonia_updater" "\0"
+            VALUE "CompanyName", "Manfredonia Team" "\0"
+            VALUE "FileDescription", "Manfredonia Manager" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "manfredonia_updater" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2025 Manfredonia Team. All rights reserved." "\0"
             VALUE "OriginalFilename", "manfredonia_updater.exe" "\0"
-            VALUE "ProductName", "manfredonia_updater" "\0"
+            VALUE "ProductName", "Manfredonia Manager" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

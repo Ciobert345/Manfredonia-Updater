@@ -1,19 +1,29 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter/foundation.dart';
+import 'settings_service.dart';
 
 class GithubRelease {
   final String tag;
   final String downloadUrl;
   final String manifestUrl;
+  final String mrpackUrl;
   final String body;
 
-  GithubRelease({required this.tag, required this.downloadUrl, required this.manifestUrl, required this.body});
+  GithubRelease({
+    required this.tag, 
+    required this.downloadUrl, 
+    required this.manifestUrl, 
+    required this.mrpackUrl, 
+    required this.body
+  });
 
   factory GithubRelease.fromJson(Map<String, dynamic> json) {
     final tag = json['tag_name'] ?? '0.0.0';
     final body = json['body'] ?? '';
     String downloadUrl = '';
     String manifestUrl = '';
+    String mrpackUrl = '';
 
     print("[GithubService] Parsing release assets for tag $tag...");
     if (json['assets'] != null) {
@@ -24,6 +34,8 @@ class GithubRelease {
           downloadUrl = asset['browser_download_url'] ?? '';
         } else if (name == 'manifest.json') {
           manifestUrl = asset['browser_download_url'] ?? '';
+        } else if (name.endsWith('.mrpack')) {
+          mrpackUrl = asset['browser_download_url'] ?? '';
         }
       }
     }
@@ -35,30 +47,68 @@ class GithubRelease {
       // We'll mark a special flag or just handle it in the Service
     }
 
-    return GithubRelease(tag: tag, downloadUrl: downloadUrl, manifestUrl: manifestUrl, body: body);
+    return GithubRelease(
+      tag: tag, 
+      downloadUrl: downloadUrl, 
+      manifestUrl: manifestUrl, 
+      mrpackUrl: mrpackUrl, 
+      body: body
+    );
   }
 }
 
 class GithubService {
   final String owner = 'Ciobert345';
   final String repo = 'Mod-server-Manfredonia';
+  
+  // PASTE YOUR GITHUB TOKEN HERE
+  static const String _apiToken = ""; 
+
+  // Simple in-memory cache
+  GithubRelease? _cachedRelease;
+  DateTime? _lastFetch;
+  final Duration _cacheTTL = const Duration(minutes: 5);
 
   Future<GithubRelease?> getLatestRelease() async {
+    // Return cached if still valid
+    if (_cachedRelease != null && _lastFetch != null) {
+      if (DateTime.now().difference(_lastFetch!) < _cacheTTL) {
+        print("[GithubService] Returning cached release info (TTL: ${DateTime.now().difference(_lastFetch!).inSeconds}s)");
+        return _cachedRelease;
+      }
+    }
+
     final url = Uri.parse('https://api.github.com/repos/$owner/$repo/releases/latest');
     
     try {
-      final response = await http.get(url, headers: {
-        'User-Agent': 'ManfredoniaUpdater-Flutter',
+      print("[GithubService] Fetching latest release from GitHub API...");
+      final headers = {
+        'User-Agent': 'ManfredoniaManager-Flutter',
         'Accept': 'application/vnd.github.v3+json',
-      }).timeout(const Duration(seconds: 10));
+      };
+      
+      final token = kDebugMode ? _apiToken : "";
+      if (token.isNotEmpty) {
+        print("[GithubService] Using Personal Access Token for request (DEBUG MODE)");
+        headers['Authorization'] = 'token $token';
+      }
+
+      final response = await http.get(url, headers: headers).timeout(const Duration(seconds: 10));
 
       if (response.statusCode == 200) {
-        return GithubRelease.fromJson(json.decode(response.body));
+        _cachedRelease = GithubRelease.fromJson(json.decode(response.body));
+        _lastFetch = DateTime.now();
+        return _cachedRelease;
+      } else if (response.statusCode == 403) {
+        print("[GithubService] RATE LIMIT EXCEEDED or Forbidden. Using cache if available.");
+        return _cachedRelease;
       }
-      return null;
+      
+      print("[GithubService] GitHub API returned status: ${response.statusCode}");
+      return _cachedRelease; // Return stale cache if API fails
     } catch (e) {
       print('Error checking GitHub: $e');
-      return null;
+      return _cachedRelease;
     }
   }
 
