@@ -69,7 +69,8 @@ msix_config:
   output_name: Manfredonia Manager
   publisher_display_name: Robert Ciobanu
   publisher: CN=Robert Ciobanu
-  certificate_subject: CN=Robert Ciobanu
+  certificate_path: cert.pfx
+  certificate_password: 123456
   identity_name: com.manfredonia.manager
   msix_version: 1.0.0.0
   logo_path: assets/app_logo_final.png
