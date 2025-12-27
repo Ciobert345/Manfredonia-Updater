@@ -89,7 +89,7 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "Manfredonia Team" "\0"
+            VALUE "CompanyName", "Robert Ciobanu" "\0"
             VALUE "FileDescription", "Manfredonia Manager" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "manfredonia_updater" "\0"
