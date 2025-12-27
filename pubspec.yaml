@@ -66,7 +66,7 @@ flutter_launcher_icons:
 
 msix_config:
   display_name: Manfredonia Manager
-  msix_name: Manfredonia Manager
+  output_name: Manfredonia Manager
   publisher_display_name: Manfredonia Team
   identity_name: com.manfredonia.manager
   msix_version: 1.0.0.0
