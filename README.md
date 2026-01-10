@@ -1,4 +1,4 @@
-# Manfredonia Manager v1.0.0
+# Manfredonia Manager
 
 <img width="2523" height="1730" alt="immagine" src="https://github.com/user-attachments/assets/5e49c3f6-091d-419c-986e-d9084c0f1119" />
 
